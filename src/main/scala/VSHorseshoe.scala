@@ -91,12 +91,6 @@ object VSHorseshoe {
     implicit val rng = rngS
     val n = dataMap.size //No of groups
 
-    // Implementation of sqrt for Real
-    def sqrtF(x: Real): Real = {
-      val lx = (Real(0.5) * x.log).exp
-      lx
-    }
-
     def updatePrior(mu: Real, sdE1: Real, sdE2: Real, sdHS: Real, sdDR: Real): scala.collection.mutable.Map[String, Map[(Int, Int), Real]] = {
       val myMap = scala.collection.mutable.Map[String, Map[(Int, Int), Real]]()
 
@@ -119,22 +113,22 @@ object VSHorseshoe {
       // Sample tau, estimate sd to be used in sampling from Normal the effects for the 1st variable
       tauE1RV = Gamma(1, 10000).param //RandomVariable[Real]
       tauE1 <- tauE1RV //Real
-      sdE1 = sqrtF(Real(1.0) / tauE1) //Real. Without Real() it is Double
+      sdE1 = (Real(1.0) / tauE1).pow(0.5) //Real. Without Real() it is Double
 
       // Sample tau, estimate sd to be used in sampling from Normal the effects for the 2nd variable
       tauE2RV = Gamma(1, 10000).param
       tauE2 <- tauE2RV
-      sdE2 = sqrtF(Real(1.0) / tauE2)
+      sdE2 = (Real(1.0) / tauE2).pow(0.5)
 
       // Sample tHS for the interaction effects
       tHSRV = halfCauchy(0, 1).param
       tHS <- tHSRV
-      sdHS = sqrtF(Real(1.0) / tHS)
+      sdHS = (Real(1.0) / tHS).pow(0.5)
 
       // Sample tau, estimate sd to be used in sampling from Normal for fitting the model
       tauDRV = Gamma(1, 10000).param
       tauD <- tauDRV
-      sdDR = sqrtF(Real(1.0) / tauD)
+      sdDR = (Real(1.0) / tauD).pow(0.5)
       //scala.collection.mutable.Map("mu" -> Map((0, 0) -> mu), "eff1" -> Map[(Int, Int), Real](), "eff2" -> Map[(Int, Int), Real](), "effg" -> Map[(Int, Int), Real](), "sigE1" -> Map((0, 0) -> sdE1), "sigE2" -> Map((0, 0) -> sdE2), "sigInter" -> Map((0, 0) -> sdG), "sigD" -> Map((0, 0) -> sdDR))
     } yield updatePrior(mu, sdE1, sdE2, sdHS, sdDR)
 
