@@ -1,62 +1,17 @@
 import java.io.{BufferedWriter, File, FileWriter}
-
-import breeze.linalg.{*, DenseMatrix, csvread}
-import breeze.numerics.log
+import breeze.linalg.{*, DenseMatrix, DenseVector, csvread}
 import breeze.stats.mean
 import com.stripe.rainier.compute._
-import com.stripe.rainier.core
-import com.stripe.rainier.core.{Normal, RandomVariable, UnboundedSupport, _}
+import com.stripe.rainier.core.{Normal, RandomVariable, _}
 import com.stripe.rainier.sampler._
-
-import scala.annotation.tailrec
 import scala.collection.immutable.ListMap
+import scala.annotation.tailrec
 
-/**
- * Variable selection with Horseshoe. Implementation for asymmetric main effects and asymmetric interactions.
- * Two main effects αs and βs, and their interactions thetas
- * Model: X_ijk | mu,a_j,b_k , tauHS, lambda_jk, theta_jk, tau  ~ N(mu + a_j + b_k + I_jk * theta_jk , τ^−1 )
- * Using gamma priors for taua and taub, Cauchy(0,1)+ for tauHS and lambda_jk
- * Variable selection with Horseshoe: theta_jk| tauHS, lambda_jk ~ N(0 , tauHS^2, lambda_jk^2^ )
- * Asymmetric main effects: as and bs come from a different distribution
- * Asymmetric Interactions: theta_jk is different from theta_kj
- **/
-object VSHorseshoe {
+
+object HorseshoeNew {
+
   val REAL_ONE = Real(1.0)
   val REAL_ZERO_POINT_FIVE = Real(0.5)
-  /**
-   * A Continuous Distribution that inherits its transforms from a Support object.
-   * Based on private[rainier] trait StandardContinuous
-   */
-  trait StandardContinuous extends Continuous {
-    //    val support = UnboundedSupport
-    val support = BoundedBelowSupport(Real.zero)
-
-    def param: RandomVariable[Real] = {
-      val x = new Variable
-
-      val transformed = support.transform(x)
-
-      val density = support.logJacobian(x) + logDensity(transformed)
-
-      RandomVariable(transformed, density)
-    }
-  }
-
-  object halfCauchy {
-    def apply(location: Real, scale: Real): Continuous =
-      standardHC().scale(scale).translate(location)
-
-    def standardHC(): StandardContinuous = new StandardContinuous {
-
-      override def logDensity(v: Real): Real =
-        (((v * v) + 1) * Math.PI).log * -1 + log(2) //Over the half
-
-      override def generator: Generator[Double] = Generator.from { (r, _) =>
-        //classic for sampling from Cauchy to take the ratio of 2 standard normals. take the abs for positive values
-        math.abs(r.standardNormal / r.standardNormal)
-      }
-    }
-  }
 
   def main(args: Array[String]): Unit = {
     val rng = ScalaRNG(3)
@@ -91,15 +46,15 @@ object VSHorseshoe {
    */
   def mainEffectsAndInters(dataMap: Map[(Int, Int), List[Double]], rngS: ScalaRNG, n1: Int, n2: Int): Unit = {
     implicit val rng = rngS
-
     val n = dataMap.size //No of groups
+
     // Implementation of sqrt for Real
     def sqrtF(x: Real): Real = {
 //      (REAL_ZERO_POINT_FIVE * x.log).exp
             x.pow(REAL_ZERO_POINT_FIVE)
     }
 
-    def updatePrior(mu: Real, sdE1: Real, sdE2: Real, sdHS: Real, sdDR: Real): scala.collection.mutable.Map[String, Map[(Int, Int), Real]] = {
+    def updatePrior(mu: Real, sdE1: Real, sdE2: Real, sdG: Real, sdDR: Real): scala.collection.mutable.Map[String, Map[(Int, Int), Real]] = {
       val myMap = scala.collection.mutable.Map[String, Map[(Int, Int), Real]]()
 
       myMap("mu") = Map((0, 0) -> mu)
@@ -108,7 +63,7 @@ object VSHorseshoe {
       myMap("effg") = Map[(Int, Int), Real]()
       myMap("sigE1") = Map((0, 0) -> sdE1)
       myMap("sigE2") = Map((0, 0) -> sdE2)
-      myMap("sdHS") = Map((0, 0) -> sdHS)
+      myMap("sdHS") = Map((0, 0) -> sdG)
       myMap("sigD") = Map((0, 0) -> sdDR)
 
       myMap
@@ -121,17 +76,17 @@ object VSHorseshoe {
       // Sample tau, estimate sd to be used in sampling from Normal the effects for the 1st variable
       tauE1RV = Gamma(1, 10000).param //RandomVariable[Real]
       tauE1 <- tauE1RV //Real
-      sdE1 = sqrtF(REAL_ONE / tauE1)//Real. Without Real() it is Double
+      sdE1 = sqrtF(REAL_ONE / tauE1) //Real. Without Real() it is Double
 
       // Sample tau, estimate sd to be used in sampling from Normal the effects for the 2nd variable
       tauE2RV = Gamma(1, 10000).param
       tauE2 <- tauE2RV
-      sdE2 = sqrtF(REAL_ONE/ tauE2)
+      sdE2 = sqrtF(REAL_ONE / tauE2)
 
       // Sample tHS for the interaction effects
-      tHSRV = halfCauchy(0, 1).param
+      tHSRV = Cauchy(0,1).param
       tHS <- tHSRV
-      sdHS = sqrtF(REAL_ONE/ tHS)
+      sdHS = sqrtF(REAL_ONE / tHS.abs)
 
       // Sample tau, estimate sd to be used in sampling from Normal for fitting the model
       tauDRV = Gamma(1, 10000).param
@@ -183,7 +138,7 @@ object VSHorseshoe {
     def addGammaEff(current: RandomVariable[scala.collection.mutable.Map[String, Map[(Int, Int), Real]]], i: Int, j: Int): RandomVariable[scala.collection.mutable.Map[String, Map[(Int, Int), Real]]] = {
       for {
         cur <- current
-        lambdajk <- halfCauchy(0,1).param.map(_.abs)
+        lambdajk <- Cauchy(0,1).param.map(_.abs)
         gm_inter <- Normal(0, 1/(cur("sdHS")(0, 0) * lambdajk)).param //it uses sd not variance
         //yield Map("mu" -> cur("mu"), "eff1" -> cur("eff1"), "eff2" -> (cur("eff2") += ((0, j) -> gm_2)), "sdE1" -> cur("sdE1"), "sdE2" -> cur("sdE2"), "sdD" -> cur("sdDR"))
       } yield updateMapGammaEff(cur, i, j, "effg", gm_inter)
@@ -276,14 +231,15 @@ object VSHorseshoe {
       val ret = f
       val execTime = (System.nanoTime - s) / 1e6
       println("time: " + execTime + "ms")
-      val bw = new BufferedWriter(new FileWriter(new File("./SimulatedDataAndTrueCoefs/results/ResultsRainierWithInterHMC300-1mHorseshoeTimeUsingBoundedSupport.txt")))
-      bw.write(execTime.toString)
-      bw.close()
+            val bw = new BufferedWriter(new FileWriter(new File("./SimulatedDataAndTrueCoefs/Example5x7/results/TimeRainierWithInterHMC300-100kHorseshoeCauchyEx5x7.txt")))
+            bw.write(execTime.toString)
+            bw.close()
       ret
     }
+
     // Sampling
     println("Model built. Sampling now (will take a long time)...")
-    val thin = 100
+    val thin = 10
     val out = time(model.sample(HMC(300), 10000, 10000 * thin, thin))
     println("Sampling finished.")
     printResults(out)
@@ -315,6 +271,7 @@ object VSHorseshoe {
       val tempList = tempData.map{case (k,listDb) => (listDb)}.toList
       DenseMatrix(tempList.map(_.toArray): _*).t
     }
+
     println("----------------mu ------------------")
     val muMat = variableDM("mu")
     println(mean(muMat(::,*)))
@@ -327,7 +284,7 @@ object VSHorseshoe {
     val effects2Mat = variableDM("eff2")
     println(mean(effects2Mat(::,*)))
 
-    println("----------------effg ------------------")
+    println("----------------effg in the order: (1,1),(1,2), (1,3),...,(2,1) etc... ------------------")
     val effgMat = variableDM("effg")
     println(mean(effgMat(::,*)))
 
@@ -349,8 +306,8 @@ object VSHorseshoe {
 
     val results = DenseMatrix.horzcat(effects1Mat, effects2Mat, effgMat, muMat, sigDMat, sigE1Mat, sigE2Mat)
 
-    val outputFile = new File("./SimulatedDataAndTrueCoefs/results/ResultsRainierWithInterHMC300-1mHorseshoeTimeUsingBoundedSupport.csv")
-    breeze.linalg.csvwrite(outputFile, results, separator = ',')
+    val outputFile = new File("./SimulatedDataAndTrueCoefs/Example5x7/results/ResultsRainierWithInterHMC300-100kHorseshoeCauchyEx5x7.csv")
+        breeze.linalg.csvwrite(outputFile, results, separator = ',')
 
   }
 }
