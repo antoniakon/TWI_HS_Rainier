@@ -183,10 +183,8 @@ object VSHorseshoe {
     def addGammaEff(current: RandomVariable[scala.collection.mutable.Map[String, Map[(Int, Int), Real]]], i: Int, j: Int): RandomVariable[scala.collection.mutable.Map[String, Map[(Int, Int), Real]]] = {
       for {
         cur <- current
-        lambdajk <- halfCauchy(0,1).param
-        lambdajk2 = lambdajk.pow(2)
-        sdHS2 = cur("sdHS")(0, 0).pow(2)
-        gm_inter <- Normal(0, 1/(sdHS2*lambdajk2)).param
+        lambdajk <- halfCauchy(0,1).param.map(_.abs)
+        gm_inter <- Normal(0, 1/(cur("sdHS")(0, 0) * lambdajk)).param //it uses sd not variance
         //yield Map("mu" -> cur("mu"), "eff1" -> cur("eff1"), "eff2" -> (cur("eff2") += ((0, j) -> gm_2)), "sdE1" -> cur("sdE1"), "sdE2" -> cur("sdE2"), "sdD" -> cur("sdDR"))
       } yield updateMapGammaEff(cur, i, j, "effg", gm_inter)
     }
