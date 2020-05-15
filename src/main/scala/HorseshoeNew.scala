@@ -23,7 +23,7 @@ object HorseshoeNew {
    * Process data read from input file
    */
   def dataProcessing(): (Map[(Int, Int), List[Double]], Int, Int) = {
-    val data = csvread(new File("./SimulatedDataAndTrueCoefs/Example5x7/simulInterSymmetricIntersEx5x7.csv"))
+    val data = csvread(new File("./SimulatedDataAndTrueCoefs/simulDataWithInters.csv"))
     val sampleSize = data.rows
     val y = data(::, 0).toArray
     val alpha = data(::, 1).map(_.toInt)
@@ -50,8 +50,8 @@ object HorseshoeNew {
 
     // Implementation of sqrt for Real
     def sqrtF(x: Real): Real = {
-      (REAL_ZERO_POINT_FIVE * x.log).exp
-      //      x.pow(REAL_ZERO_POINT_FIVE)
+//      (REAL_ZERO_POINT_FIVE * x.log).exp
+            x.pow(REAL_ZERO_POINT_FIVE)
     }
 
     def updatePrior(mu: Real, sdE1: Real, sdE2: Real, sdG: Real, sdDR: Real): scala.collection.mutable.Map[String, Map[(Int, Int), Real]] = {
@@ -138,10 +138,8 @@ object HorseshoeNew {
     def addGammaEff(current: RandomVariable[scala.collection.mutable.Map[String, Map[(Int, Int), Real]]], i: Int, j: Int): RandomVariable[scala.collection.mutable.Map[String, Map[(Int, Int), Real]]] = {
       for {
         cur <- current
-        lambdajk <- Cauchy(0,1).param
-        lambdajk2 = lambdajk.pow(2)
-        sdHS2 = cur("sdHS")(0, 0).pow(2)
-        gm_inter <- Normal(0, 1/(sdHS2*lambdajk2)).param
+        lambdajk <- Cauchy(0,1).param.map(_.abs)
+        gm_inter <- Normal(0, 1/(cur("sdHS")(0, 0) * lambdajk)).param //it uses sd not variance
         //yield Map("mu" -> cur("mu"), "eff1" -> cur("eff1"), "eff2" -> (cur("eff2") += ((0, j) -> gm_2)), "sdE1" -> cur("sdE1"), "sdE2" -> cur("sdE2"), "sdD" -> cur("sdDR"))
       } yield updateMapGammaEff(cur, i, j, "effg", gm_inter)
     }
