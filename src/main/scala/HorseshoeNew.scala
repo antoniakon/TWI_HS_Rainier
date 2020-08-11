@@ -1,9 +1,11 @@
-import java.io.{BufferedWriter, File, FileWriter}
+import java.io.{BufferedWriter, File, FileWriter, PrintWriter}
+
 import breeze.linalg.{*, DenseMatrix, DenseVector, csvread}
 import breeze.stats.mean
 import com.stripe.rainier.compute._
 import com.stripe.rainier.core.{Normal, RandomVariable, _}
 import com.stripe.rainier.sampler._
+
 import scala.collection.immutable.ListMap
 import scala.annotation.tailrec
 
@@ -246,14 +248,14 @@ object HorseshoeNew {
     val thin = 10
     val out = time(model.sample(HMC(300), 10000, 10000 * thin, thin))
     println("Sampling finished.")
-    printResults(out)
+    printResults(out, n1, n2)
 
   }
 
   /**
    * Takes the result of the sampling and processes and prints the results
    */
-  def printResults(out: scala.List[Map[String, Map[(Int, Int), Double]]]) = {
+  def printResults(out: scala.List[Map[String, Map[(Int, Int), Double]]], n1: Int, n2: Int) = {
 
     def variableDM(varName: String):  DenseMatrix[Double] ={
 
@@ -312,10 +314,39 @@ object HorseshoeNew {
     val sigDMat = variableDM("sigD")
     println(mean(sigDMat(::,*)))
 
-    val results = DenseMatrix.horzcat(effects1Mat, effects2Mat, effgMat, muMat, sigDMat, sigE1Mat, sigE2Mat)
+    val results = DenseMatrix.horzcat(muMat, sigDMat, sigE1Mat, sigE2Mat, sigHSMat, effects1Mat, effects2Mat, effgMat, effLambdaMat )
 
-    val outputFile = new File("./SimulatedDataAndTrueCoefs/Example5x7/results/ResultsRainierWithInterHMC300-100kHorseshoeCauchyEx5x7.csv")
-        breeze.linalg.csvwrite(outputFile, results, separator = ',')
+    val outputFile = new File("./SimulatedDataAndTrueCoefs/Example5x7/try.csv")
+    //            breeze.linalg.csvwrite(outputFile, results, separator = ',')
 
+    printTitlesToFile(results, n1, n2, outputFile )
+    def printTitlesToFile(resMat: DenseMatrix[Double], n1: Int, n2: Int, outputFile: File): Unit = {
+      val pw = new PrintWriter(outputFile)
+
+      val gammaTitles = (1 to n1)
+        .map { i => "-".concat(i.toString) }
+        .map { entry =>
+          (1 to n2).map { j => "gamma".concat(j.toString).concat(entry) }.mkString(",")
+        }.mkString(",")
+
+      val lambdaTitles = (1 to n1)
+        .map { i => "-".concat(i.toString) }
+        .map { entry =>
+          (1 to n2).map { j => "lambda".concat(j.toString).concat(entry) }.mkString(",")
+        }.mkString(",")
+
+      pw.append("mu ,sigD, sigE1, sigE2, sigHS,")
+        .append( (1 to n1).map { i => "alpha".concat(i.toString) }.mkString(",") )
+        .append(",")
+        .append( (1 to n2).map { i => "beta".concat(i.toString) }.mkString(",") )
+        .append(",")
+        .append(gammaTitles)
+        .append(",")
+        .append(lambdaTitles)
+        .append("\n")
+
+      breeze.linalg.csvwrite(outputFile, resMat, separator = ',')
+      pw.close()
+    }
   }
 }
