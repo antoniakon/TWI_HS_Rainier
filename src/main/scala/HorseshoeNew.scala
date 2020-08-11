@@ -61,6 +61,7 @@ object HorseshoeNew {
       myMap("eff1") = Map[(Int, Int), Real]()
       myMap("eff2") = Map[(Int, Int), Real]()
       myMap("effg") = Map[(Int, Int), Real]()
+      myMap("lambdajk") = Map[(Int, Int), Real]()
       myMap("sigE1") = Map((0, 0) -> sdE1)
       myMap("sigE2") = Map((0, 0) -> sdE2)
       myMap("sdHS") = Map((0, 0) -> sdG)
@@ -127,8 +128,9 @@ object HorseshoeNew {
     /**
      * Helper function to update the values for the interaction effects of the Map
      */
-    def updateMapGammaEff(myMap: scala.collection.mutable.Map[String, Map[(Int, Int), Real]], i: Int, j: Int, key: String, addedValue: Real): scala.collection.mutable.Map[String, Map[(Int, Int), Real]] = {
-      myMap(key) += ((i, j) -> addedValue)
+    def updateMapGammaEffLambda(myMap: scala.collection.mutable.Map[String, Map[(Int, Int), Real]], i: Int, j: Int, key1: String, addedValue1: Real, key2: String, addedValue2: Real): scala.collection.mutable.Map[String, Map[(Int, Int), Real]] = {
+      myMap(key1) += ((i, j) -> addedValue1)
+      myMap(key2) += ((i, j) -> addedValue2)
       myMap
     }
 
@@ -141,7 +143,7 @@ object HorseshoeNew {
         lambdajk <- Cauchy(0,1).param.map(_.abs)
         gm_inter <- Normal(0, 1/(cur("sdHS")(0, 0) * lambdajk)).param //it uses sd not variance
         //yield Map("mu" -> cur("mu"), "eff1" -> cur("eff1"), "eff2" -> (cur("eff2") += ((0, j) -> gm_2)), "sdE1" -> cur("sdE1"), "sdE2" -> cur("sdE2"), "sdD" -> cur("sdDR"))
-      } yield updateMapGammaEff(cur, i, j, "effg", gm_inter)
+      } yield updateMapGammaEffLambda(cur, i, j, "effg", gm_inter, "lambdajk", lambdajk)
     }
 
     /**
@@ -221,6 +223,8 @@ object HorseshoeNew {
       "eff1" -> mod("eff1"),
       "eff2" -> mod("eff2"),
       "effg" -> mod("effg"),
+      "lambdajk" -> mod("lambdajk"),
+      "sdHS" -> mod("sdHS"),
       "sigE1" -> mod("sigE1"),
       "sigE2" -> mod("sigE2"),
       "sigD" -> mod("sigD"))
@@ -263,9 +267,9 @@ object HorseshoeNew {
       // This is necessary for comparing the results from Scala and R in R
       val tempData= {
         varName match {
-          case "mu" | "tau" | "sigE1" | "sigE2" | "sigD" => sepVariableData
+          case "mu" | "sigE1" | "sigE2" | "sigD" | "sdHS" => sepVariableData
           case "eff1" | "eff2" => ListMap(sepVariableData.toSeq.sortBy(_._1._2):_*)
-          case "effg" => ListMap(sepVariableData.toSeq.sortBy(_._1._2).sortBy(_._1._1):_*)
+          case "effg" | "lambdajk" => ListMap(sepVariableData.toSeq.sortBy(_._1._2).sortBy(_._1._1):_*)
         }
       }
       val tempList = tempData.map{case (k,listDb) => (listDb)}.toList
@@ -288,9 +292,13 @@ object HorseshoeNew {
     val effgMat = variableDM("effg")
     println(mean(effgMat(::,*)))
 
-    //    println("----------------sigInter ------------------")
-    //    val sigInterMat = variableDM("sigInter")
-    //    println(mean(sigInterMat(::,*)))
+    println("----------------lambdajk in the order: (1,1),(1,2), (1,3),...,(2,1) etc... ------------------")
+    val effLambdaMat = variableDM("lambdajk")
+    println(mean(effLambdaMat(::,*)))
+
+    println("----------------sdHS ------------------")
+    val sigHSMat = variableDM("sdHS")
+    println(mean(sigHSMat(::,*)))
 
     println("----------------sigΕ1 ------------------")
     val sigE1Mat = variableDM("sigE1")
