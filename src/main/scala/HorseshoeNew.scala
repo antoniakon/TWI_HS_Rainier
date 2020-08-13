@@ -25,7 +25,7 @@ object HorseshoeNew {
    * Process data read from input file
    */
   def dataProcessing(): (Map[(Int, Int), List[Double]], Int, Int) = {
-    val data = csvread(new File("./SimulatedDataAndTrueCoefs/simulDataWithInters.csv"))
+    val data = csvread(new File("./simulDataWithInters.csv"))
     val sampleSize = data.rows
     val y = data(::, 0).toArray
     val alpha = data(::, 1).map(_.toInt)
@@ -52,8 +52,8 @@ object HorseshoeNew {
 
     // Implementation of sqrt for Real
     def sqrtF(x: Real): Real = {
-//      (REAL_ZERO_POINT_FIVE * x.log).exp
-            x.pow(REAL_ZERO_POINT_FIVE)
+      //      (REAL_ZERO_POINT_FIVE * x.log).exp
+      x.pow(REAL_ZERO_POINT_FIVE)
     }
 
     def updatePrior(mu: Real, sdE1: Real, sdE2: Real, sdG: Real, sdDR: Real): scala.collection.mutable.Map[String, Map[(Int, Int), Real]] = {
@@ -237,9 +237,9 @@ object HorseshoeNew {
       val ret = f
       val execTime = (System.nanoTime - s) / 1e6
       println("time: " + execTime + "ms")
-            val bw = new BufferedWriter(new FileWriter(new File("./SimulatedDataAndTrueCoefs/Example5x7/results/TimeRainierWithInterHMC300-100kHorseshoeCauchyEx5x7.txt")))
-            bw.write(execTime.toString)
-            bw.close()
+      val bw = new BufferedWriter(new FileWriter(new File("./asymmetricBoth10x15RainierHorseshoeHMC300Runtime1mAllSaved.txt")))
+      bw.write(execTime.toString)
+      bw.close()
       ret
     }
 
@@ -316,7 +316,7 @@ object HorseshoeNew {
 
     val results = DenseMatrix.horzcat(muMat, sigDMat, sigE1Mat, sigE2Mat, sigHSMat, effects1Mat, effects2Mat, effgMat, effLambdaMat )
 
-    val outputFile = new File("./SimulatedDataAndTrueCoefs/Example5x7/try.csv")
+    val outputFile = new File("./asymmetricBothRainierHorseshoe10x151mHMC300AllSaved.csv")
     //            breeze.linalg.csvwrite(outputFile, results, separator = ',')
 
     printTitlesToFile(results, n1, n2, outputFile )
