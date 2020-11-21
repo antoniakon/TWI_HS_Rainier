@@ -9,7 +9,15 @@ import com.stripe.rainier.sampler._
 import scala.collection.immutable.ListMap
 import scala.annotation.tailrec
 
+/**
+ * Variable selection using the Horseshoe version 3. Uses Avi Bryand's suggestion for half-Cauchy using .abs
+ */
 
+/**
+ * Builds a 2-way Anova model with variable selection in Scala using Rainier version 0.2.2
+ * Main effects: a and b. Interaction effects: gamma. Apply variable selection on the interactions using the Horseshoe prior
+ * Model: X_ijk | mu, a_j, b_k, gamma_jk, tau, lambda_jk, tauHS  ~ N(mu + a_j + b_k + gamma_jk , τ^−1 )
+ */
 object HorseshoeNew {
 
   val REAL_ONE = Real(1.0)
@@ -17,16 +25,33 @@ object HorseshoeNew {
 
   def main(args: Array[String]): Unit = {
     val rng = ScalaRNG(3)
-    val (data, n1, n2) = dataProcessing()
-    mainEffectsAndInters(data, rng, n1, n2)
+    val inputFilePath = "./SimulatedDataAndTrueCoefs/simulDataWithInters.csv"
+    val outputFilePath = "./asymmetricBothRainierHorseshoe10x151mHMC300AllSaved.csv"
+    val runtimeFilePath = "./asymmetricBoth10x15RainierHorseshoeHMC300Runtime1mAllSaved.txt"
+    val (data, n1, n2) = dataProcessing(inputFilePath)
+    val HMCResultsHS = mainEffectsAndInters(data, rng, n1, n2, runtimeFilePath)
+    printAndSaveResults(HMCResultsHS, n1, n2, outputFilePath)
+  }
+
+  /**
+   * Calculate execution time
+   */
+  def time[A](f: => A, runtimeFilePath: String): A = {
+    val s = System.nanoTime
+    val ret = f
+    val execTime = (System.nanoTime - s) / 1e6
+    println("time: " + execTime + "ms")
+    val bw = new BufferedWriter(new FileWriter(new File("./asymmetricBoth10x15RainierHorseshoeHMC300Runtime1mAllSaved.txt")))
+    bw.write(execTime.toString)
+    bw.close()
+    ret
   }
 
   /**
    * Process data read from input file
    */
-  def dataProcessing(): (Map[(Int, Int), List[Double]], Int, Int) = {
-    val data = csvread(new File("./simulDataWithInters.csv"))
-    val sampleSize = data.rows
+  def dataProcessing(inputFilePath: String): (Map[(Int, Int), List[Double]], Int, Int) = {
+    val data = csvread(new File(inputFilePath))
     val y = data(::, 0).toArray
     val alpha = data(::, 1).map(_.toInt)
     val beta = data(::, 2).map(_.toInt)
@@ -39,16 +64,16 @@ object HorseshoeNew {
       dataList = dataList :+ (alpha(i), beta(i))
     }
 
+    // Create a Map[(Int, Int), List[Double]] to represent the data. Key: (levelForFirstVariable, levelForSecondVariable), value: List of observations
     val dataMap = (dataList zip y).groupBy(_._1).map { case (k, v) => ((k._1 - 1, k._2 - 1), v.map(_._2)) }
     (dataMap, nj, nk)
   }
 
   /**
-   * Use Rainier for modelling the main effects only, without interactions
+   * Use Rainier for modelling main and interaction effects. Apply variable selection to the interactions using Horseshoe priors
    */
-  def mainEffectsAndInters(dataMap: Map[(Int, Int), List[Double]], rngS: ScalaRNG, n1: Int, n2: Int): Unit = {
+  def mainEffectsAndInters(dataMap: Map[(Int, Int), List[Double]], rngS: ScalaRNG, n1: Int, n2: Int, runtimeFilePath: String): scala.List[Map[String, Map[(Int, Int), Double]]] = {
     implicit val rng = rngS
-    val n = dataMap.size //No of groups
 
     // Implementation of sqrt for Real
     def sqrtF(x: Real): Real = {
@@ -73,9 +98,10 @@ object HorseshoeNew {
     }
 
     //Define the prior
-    //For jags we had: mu~dnorm(0,0.0001) and jags uses precision, so here we use sd = sqrt(1/tau)
+    //Jags uses precision and we have: mu ~ dnorm(0, 0.0001), here we use sd = sqrt(1/tau)
     val prior = for {
       mu <- Normal(0, 100).param
+
       // Sample tau, estimate sd to be used in sampling from Normal the effects for the 1st variable
       tauE1RV = Gamma(1, 10000).param //RandomVariable[Real]
       tauE1 <- tauE1RV //Real
@@ -143,7 +169,7 @@ object HorseshoeNew {
       for {
         cur <- current
         lambdajk <- Cauchy(0,1).param.map(_.abs)
-        gm_inter <- Normal(0, 1/(cur("sdHS")(0, 0) * lambdajk)).param //it uses sd not variance
+        gm_inter <- Normal(0, 1/(cur("sdHS")(0, 0) * lambdajk)).param
         //yield Map("mu" -> cur("mu"), "eff1" -> cur("eff1"), "eff2" -> (cur("eff2") += ((0, j) -> gm_2)), "sdE1" -> cur("sdE1"), "sdE2" -> cur("sdE2"), "sdD" -> cur("sdDR"))
       } yield updateMapGammaEffLambda(cur, i, j, "effg", gm_inter, "lambdajk", lambdajk)
     }
@@ -231,34 +257,23 @@ object HorseshoeNew {
       "sigE2" -> mod("sigE2"),
       "sigD" -> mod("sigD"))
 
-    // Calculation of the execution time
-    def time[A](f: => A): A = {
-      val s = System.nanoTime
-      val ret = f
-      val execTime = (System.nanoTime - s) / 1e6
-      println("time: " + execTime + "ms")
-      val bw = new BufferedWriter(new FileWriter(new File("./asymmetricBoth10x15RainierHorseshoeHMC300Runtime1mAllSaved.txt")))
-      bw.write(execTime.toString)
-      bw.close()
-      ret
-    }
-
     // Sampling
     println("Model built. Sampling now (will take a long time)...")
     val thin = 10
-    val out = time(model.sample(HMC(300), 10000, 10000 * thin, thin))
+    val out = time(model.sample(HMC(300), 10000, 10000 * thin, thin), runtimeFilePath)
     println("Sampling finished.")
-    printResults(out, n1, n2)
-
+    out
   }
 
   /**
-   * Takes the result of the sampling and processes and prints the results
+   * Process the result of sampling, print and save the results
    */
-  def printResults(out: scala.List[Map[String, Map[(Int, Int), Double]]], n1: Int, n2: Int) = {
+  def printAndSaveResults(out: scala.List[Map[String, Map[(Int, Int), Double]]], n1: Int, n2: Int, outputFilePath: String) = {
 
+    /**
+     * Select the results for a specific variable and convert them to DenseMatrix
+     */
     def variableDM(varName: String):  DenseMatrix[Double] ={
-
       // Separate the data for the specific variable of interest
       val sepVariableData = out
         .flatMap{ eff1ListItem => eff1ListItem(varName) }
@@ -266,7 +281,7 @@ object HorseshoeNew {
         .map { case (k, v) => k -> v.map(_._2) }
 
       // If the map contains more than one keys, they need to be sorted out to express the effects sequentially.
-      // This is necessary for comparing the results from Scala and R in R
+      // This is necessary to compare the results from Rainier, Scala and R in R
       val tempData= {
         varName match {
           case "mu" | "sigE1" | "sigE2" | "sigD" | "sdHS" => sepVariableData
@@ -316,10 +331,13 @@ object HorseshoeNew {
 
     val results = DenseMatrix.horzcat(muMat, sigDMat, sigE1Mat, sigE2Mat, sigHSMat, effects1Mat, effects2Mat, effgMat, effLambdaMat )
 
-    val outputFile = new File("./asymmetricBothRainierHorseshoe10x151mHMC300AllSaved.csv")
-    //            breeze.linalg.csvwrite(outputFile, results, separator = ',')
+    val outputFile = new File(outputFilePath)
 
     printTitlesToFile(results, n1, n2, outputFile )
+
+    /**
+     * Save results to csv files
+     */
     def printTitlesToFile(resMat: DenseMatrix[Double], n1: Int, n2: Int, outputFile: File): Unit = {
       val pw = new PrintWriter(outputFile)
 
